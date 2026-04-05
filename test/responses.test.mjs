@@ -61,6 +61,31 @@ test("maps responses request into chat completions request", () => {
   assert.equal(request.max_tokens, 512);
 });
 
+test("maps responses developer role into a chat system message", () => {
+  const request = responsesToChatRequest({
+    model: "glm-5",
+    input: [
+      {
+        role: "developer",
+        content: [
+          { type: "input_text", text: "Use terse answers." },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "hi" },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(request.messages, [
+    { role: "system", content: "Use terse answers." },
+    { role: "user", content: "hi" },
+  ]);
+});
+
 test("preserves responses tool_choice none", () => {
   const request = responsesToChatRequest({
     model: "glm-5",
@@ -69,6 +94,59 @@ test("preserves responses tool_choice none", () => {
   });
 
   assert.equal(request.tool_choice, "none");
+});
+
+test("drops hosted responses tools from the upstream chat request", () => {
+  const request = responsesToChatRequest({
+    model: "glm-5",
+    input: "search for this",
+    tools: [
+      { type: "web_search" },
+      {
+        type: "function",
+        name: "read",
+        description: "Read a file",
+        parameters: {
+          type: "object",
+          properties: {
+            filePath: { type: "string" },
+          },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(request.tools, [
+    {
+      type: "function",
+      function: {
+        name: "read",
+        description: "Read a file",
+        parameters: {
+          type: "object",
+          properties: {
+            filePath: { type: "string" },
+          },
+        },
+      },
+    },
+  ]);
+});
+
+test("accepts responses developer role with text input", () => {
+  const error = validateResponsesRequest({
+    model: "glm-5",
+    input: [
+      {
+        role: "developer",
+        content: [
+          { type: "input_text", text: "Use tools only when necessary." },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(error, null);
 });
 
 test("rejects unsupported responses input item types", () => {
@@ -86,17 +164,45 @@ test("rejects unsupported responses input item types", () => {
   );
 });
 
-test("rejects unsupported responses tool types", () => {
+test("accepts hosted responses tools for compatibility", () => {
   const error = validateResponsesRequest({
     model: "glm-5",
     input: "search for this",
-    tools: [{ type: "web_search_preview" }],
+    tools: [{ type: "web_search" }, { type: "web_search_preview" }],
   });
 
-  assert.equal(
-    error,
-    "Unsupported responses tool type: web_search_preview. Upstream only supports function tools.",
-  );
+  assert.equal(error, null);
+});
+
+test("drops unsupported responses tool_choice when no function tools remain", () => {
+  const request = responsesToChatRequest({
+    model: "glm-5",
+    input: "search for this",
+    tools: [{ type: "web_search" }],
+    tool_choice: "required",
+  });
+
+  assert.equal(Object.hasOwn(request, "tool_choice"), false);
+  assert.equal(Object.hasOwn(request, "tools"), false);
+});
+
+test("drops hosted responses tool_choice objects from the upstream chat request", () => {
+  const request = responsesToChatRequest({
+    model: "glm-5",
+    input: "search for this",
+    tools: [
+      { type: "web_search" },
+      {
+        type: "function",
+        name: "read",
+        description: "Read a file",
+      },
+    ],
+    tool_choice: { type: "web_search" },
+  });
+
+  assert.equal(Object.hasOwn(request, "tool_choice"), false);
+  assert.equal(request.tools[0].function.name, "read");
 });
 
 test("builds responses object from chat completion response", () => {

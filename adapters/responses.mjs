@@ -20,6 +20,17 @@ function isTextPart(item) {
   return item?.type === "input_text" || item?.type === "output_text" || item?.type === "text";
 }
 
+function mapResponsesRoleToChatRole(role) {
+  if (role === "developer") {
+    return "system";
+  }
+  return role;
+}
+
+function isFunctionTool(tool) {
+  return tool?.type === "function";
+}
+
 function validateResponseContentParts(content, { allowFunctionCall = false } = {}) {
   for (const item of arrayify(content)) {
     if (typeof item === "string" || isTextPart(item)) {
@@ -38,14 +49,16 @@ function validateResponseInputItem(item) {
     return null;
   }
 
-  if (item.role === "user" || item.role === "system") {
+  const role = mapResponsesRoleToChatRole(item.role);
+
+  if (role === "user" || role === "system") {
     const unsupportedType = validateResponseContentParts(item.content);
     return unsupportedType
       ? `Unsupported responses ${item.role} content type: ${unsupportedType}. Upstream only supports text input.`
       : null;
   }
 
-  if (item.role === "assistant") {
+  if (role === "assistant") {
     const unsupportedType = validateResponseContentParts(item.content, { allowFunctionCall: true });
     return unsupportedType
       ? `Unsupported responses assistant content type: ${unsupportedType}. Upstream only supports text and function_call output.`
@@ -71,16 +84,6 @@ export function validateResponsesRequest(body) {
         return itemError;
       }
     }
-  }
-
-  for (const tool of arrayify(body?.tools)) {
-    if (tool?.type !== "function") {
-      return `Unsupported responses tool type: ${tool?.type || "unknown"}. Upstream only supports function tools.`;
-    }
-  }
-
-  if (body?.tool_choice && typeof body.tool_choice === "object" && body.tool_choice.type !== "function") {
-    return `Unsupported responses tool_choice type: ${body.tool_choice.type || "unknown"}. Upstream only supports auto, required, none, or function tool_choice.`;
   }
 
   return null;
@@ -114,21 +117,32 @@ function extractTextFromResponseContent(content) {
     .join("");
 }
 
-function mapResponseToolChoice(toolChoice) {
+function mapResponseToolChoice(toolChoice, tools) {
+  const functionTools = mapResponseTools(tools);
+  const functionToolNames = new Set(functionTools.map((tool) => tool.function.name));
+  const hasFunctionTools = functionTools.length > 0;
+
   if (!toolChoice) {
     return undefined;
   }
   if (typeof toolChoice === "string") {
+    if (!hasFunctionTools && toolChoice !== "none") {
+      return undefined;
+    }
     if (toolChoice === "auto" || toolChoice === "required" || toolChoice === "none") {
       return toolChoice;
     }
     return undefined;
   }
   if (toolChoice.type === "function") {
+    const name = toolChoice.name || toolChoice.function?.name;
+    if (!name || !functionToolNames.has(name)) {
+      return undefined;
+    }
     return {
       type: "function",
       function: {
-        name: toolChoice.name || toolChoice.function?.name,
+        name,
       },
     };
   }
@@ -137,7 +151,7 @@ function mapResponseToolChoice(toolChoice) {
 
 function mapResponseTools(tools) {
   return arrayify(tools)
-    .filter((tool) => tool?.type === "function")
+    .filter(isFunctionTool)
     .map((tool) => ({
       type: "function",
       function: {
@@ -154,7 +168,7 @@ function responseInputItemToChatMessages(item) {
   }
 
   if (item.role) {
-    const role = item.role;
+    const role = mapResponsesRoleToChatRole(item.role);
     const text = extractTextFromResponseContent(item.content);
 
     if (role === "user" || role === "system") {
@@ -237,7 +251,7 @@ export function responsesToChatRequest(body, previousMessages = []) {
   }
 
   const tools = mapResponseTools(body.tools);
-  const toolChoice = mapResponseToolChoice(body.tool_choice);
+  const toolChoice = mapResponseToolChoice(body.tool_choice, body.tools);
 
   return {
     model: body.model,

@@ -13,7 +13,7 @@ Current upstream limitations:
 
 - text input/output only
 - function tools only
-- no image, search, file-search, or other hosted tool types
+- hosted tools such as `web_search`, `file_search`, and image tools are ignored on `/v1/responses`
 
 ## Start
 
