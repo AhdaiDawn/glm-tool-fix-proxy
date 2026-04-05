@@ -5,6 +5,7 @@ import {
   AnthropicMessagesStreamAdapter,
   anthropicToChatRequest,
   chatToAnthropicMessage,
+  validateAnthropicRequest,
 } from "./adapters/messages.mjs";
 import {
   OpenAIResponsesStreamAdapter,
@@ -13,6 +14,7 @@ import {
   buildStoredConversation,
   responsesToChatRequest,
   shouldStoreResponse,
+  validateResponsesRequest,
 } from "./adapters/responses.mjs";
 import { pipeTransformedSse } from "./core/sse.mjs";
 import {
@@ -30,7 +32,12 @@ import {
 import { resolveUpstreamModel } from "./core/model-routing.mjs";
 import { UPSTREAM_MAX_TOKENS, clampMaxTokens, parseContextLimitRetry } from "./core/token-limits.mjs";
 
-const responseStore = new ResponseStore();
+const RESPONSE_STORE_MAX_ENTRIES = Number.parseInt(process.env.RESPONSE_STORE_MAX_ENTRIES || "1000", 10);
+const responseStore = new ResponseStore({
+  maxEntries: Number.isFinite(RESPONSE_STORE_MAX_ENTRIES) && RESPONSE_STORE_MAX_ENTRIES > 0
+    ? RESPONSE_STORE_MAX_ENTRIES
+    : 1000,
+});
 const PROXY_LOG = process.env.PROXY_LOG === "1" || process.env.PROXY_LOG === "true";
 
 function logEvent(event, fields = {}) {
@@ -210,6 +217,18 @@ async function handleMessagesRequest(req, res, bodyJson, logContext) {
     return;
   }
 
+  const validationError = validateAnthropicRequest(bodyJson);
+  if (validationError) {
+    sendJson(res, 400, {
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        message: validationError,
+      },
+    });
+    return;
+  }
+
   const upstreamModel = resolveUpstreamModel(bodyJson.model);
   const tokenLimit = clampMaxTokens(bodyJson.max_tokens);
   function buildMessagesUpstreamBody(maxTokensOverride) {
@@ -302,6 +321,17 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
     sendJson(res, 400, {
       error: {
         message: "Expected a JSON body for POST /v1/responses.",
+        type: "invalid_request_error",
+      },
+    });
+    return;
+  }
+
+  const validationError = validateResponsesRequest(bodyJson);
+  if (validationError) {
+    sendJson(res, 400, {
+      error: {
+        message: validationError,
         type: "invalid_request_error",
       },
     });

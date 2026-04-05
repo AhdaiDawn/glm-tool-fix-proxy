@@ -66,6 +66,41 @@ function normalizeAnthropicSystem(system) {
     .join("\n");
 }
 
+function validateAnthropicContent(message) {
+  const content = normalizeAnthropicContent(message?.content);
+  const role = message?.role;
+
+  for (const block of content) {
+    if (block?.type === "text") {
+      continue;
+    }
+    if (role === "user" && block?.type === "tool_result") {
+      continue;
+    }
+    if (role === "assistant" && block?.type === "tool_use") {
+      continue;
+    }
+    return `Unsupported anthropic ${role || "unknown"} content type: ${block?.type || "unknown"}. Upstream only supports text and tool calls.`;
+  }
+
+  return null;
+}
+
+export function validateAnthropicRequest(body) {
+  for (const message of arrayify(body?.messages)) {
+    if (message?.role !== "user" && message?.role !== "assistant") {
+      return `Unsupported anthropic role: ${message?.role || "unknown"}.`;
+    }
+
+    const contentError = validateAnthropicContent(message);
+    if (contentError) {
+      return contentError;
+    }
+  }
+
+  return null;
+}
+
 export function anthropicToChatRequest(body) {
   const messages = [];
   const systemText = normalizeAnthropicSystem(body.system);
@@ -371,7 +406,7 @@ export class AnthropicMessagesStreamAdapter {
     }
 
     if (parsedBlock.data === "[DONE]") {
-      return "";
+      return this.started && !this.finished ? this.finish([]) : "";
     }
 
     let payload;

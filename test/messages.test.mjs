@@ -4,6 +4,7 @@ import {
   AnthropicMessagesStreamAdapter,
   anthropicToChatRequest,
   chatToAnthropicMessage,
+  validateAnthropicRequest,
 } from "../adapters/messages.mjs";
 
 function sseChunk(payload) {
@@ -128,6 +129,25 @@ test("maps chat completion response into anthropic message", () => {
   });
 });
 
+test("rejects unsupported anthropic content types", () => {
+  const error = validateAnthropicRequest({
+    model: "glm-5",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(
+    error,
+    "Unsupported anthropic user content type: image. Upstream only supports text and tool calls.",
+  );
+});
+
 test("streams anthropic tool_use events from chat tool_call deltas", () => {
   const adapter = new AnthropicMessagesStreamAdapter({ model: "glm-5" });
 
@@ -200,4 +220,25 @@ test("does not synthesize anthropic completion events for an incomplete upstream
 
   assert.equal(adapter.finished, false);
   assert.equal(adapter.flush(), "");
+});
+
+test("finishes an anthropic stream when upstream ends with DONE", () => {
+  const adapter = new AnthropicMessagesStreamAdapter({ model: "glm-5" });
+
+  adapter.handleBlock(
+    sseChunk({
+      choices: [
+        {
+          delta: {
+            content: "partial",
+          },
+        },
+      ],
+    }).trimEnd(),
+  );
+
+  const done = adapter.handleBlock("data: [DONE]");
+
+  assert.match(done, /event: message_stop/);
+  assert.equal(adapter.finished, true);
 });

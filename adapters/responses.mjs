@@ -16,6 +16,76 @@ function arrayify(value) {
   return [value];
 }
 
+function isTextPart(item) {
+  return item?.type === "input_text" || item?.type === "output_text" || item?.type === "text";
+}
+
+function validateResponseContentParts(content, { allowFunctionCall = false } = {}) {
+  for (const item of arrayify(content)) {
+    if (typeof item === "string" || isTextPart(item)) {
+      continue;
+    }
+    if (allowFunctionCall && item?.type === "function_call") {
+      continue;
+    }
+    return item?.type || "unknown";
+  }
+  return null;
+}
+
+function validateResponseInputItem(item) {
+  if (!item) {
+    return null;
+  }
+
+  if (item.role === "user" || item.role === "system") {
+    const unsupportedType = validateResponseContentParts(item.content);
+    return unsupportedType
+      ? `Unsupported responses ${item.role} content type: ${unsupportedType}. Upstream only supports text input.`
+      : null;
+  }
+
+  if (item.role === "assistant") {
+    const unsupportedType = validateResponseContentParts(item.content, { allowFunctionCall: true });
+    return unsupportedType
+      ? `Unsupported responses assistant content type: ${unsupportedType}. Upstream only supports text and function_call output.`
+      : null;
+  }
+
+  if (item.role) {
+    return `Unsupported responses role: ${item.role}.`;
+  }
+
+  if (item.type === "function_call_output" || item.type === "function_call" || item.type === "input_text") {
+    return null;
+  }
+
+  return `Unsupported responses input item type: ${item.type || "unknown"}. Upstream only supports text and function calls.`;
+}
+
+export function validateResponsesRequest(body) {
+  if (body?.input !== undefined && typeof body.input !== "string") {
+    for (const item of arrayify(body.input)) {
+      const itemError = validateResponseInputItem(item);
+      if (itemError) {
+        return itemError;
+      }
+    }
+  }
+
+  for (const tool of arrayify(body?.tools)) {
+    if (tool?.type !== "function") {
+      return `Unsupported responses tool type: ${tool?.type || "unknown"}. Upstream only supports function tools.`;
+    }
+  }
+
+  if (body?.tool_choice && typeof body.tool_choice === "object" && body.tool_choice.type !== "function") {
+    return `Unsupported responses tool_choice type: ${body.tool_choice.type || "unknown"}. Upstream only supports auto, required, none, or function tool_choice.`;
+  }
+
+  return null;
+}
+
 function stringifyValue(value) {
   if (typeof value === "string") {
     return value;
@@ -282,8 +352,9 @@ export function buildResponsesObject(body, chatResponse, responseId) {
 }
 
 export class ResponseStore {
-  constructor() {
+  constructor({ maxEntries = 1000 } = {}) {
     this.responses = new Map();
+    this.maxEntries = maxEntries;
   }
 
   get(responseId) {
@@ -291,7 +362,14 @@ export class ResponseStore {
   }
 
   set(responseId, value) {
+    if (this.responses.has(responseId)) {
+      this.responses.delete(responseId);
+    }
     this.responses.set(responseId, value);
+    while (this.maxEntries > 0 && this.responses.size > this.maxEntries) {
+      const oldestKey = this.responses.keys().next().value;
+      this.responses.delete(oldestKey);
+    }
   }
 }
 
@@ -316,7 +394,7 @@ export class OpenAIResponsesStreamAdapter {
   }
 
   buildResponse(status) {
-    return {
+    const response = {
       id: this.responseId,
       object: "response",
       created_at: this.createdAt,
@@ -345,6 +423,12 @@ export class OpenAIResponsesStreamAdapter {
       user: this.body.user || null,
       metadata: this.body.metadata || {},
     };
+
+    if (status === "completed") {
+      response.completed_at = Math.floor(Date.now() / 1000);
+    }
+
+    return response;
   }
 
   startEvents() {
@@ -539,7 +623,7 @@ export class OpenAIResponsesStreamAdapter {
     }
 
     if (parsedBlock.data === "[DONE]") {
-      return "";
+      return this.started && !this.finished ? this.finish([]) : "";
     }
 
     let payload;

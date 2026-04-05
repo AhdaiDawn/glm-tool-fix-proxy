@@ -6,6 +6,8 @@ import {
   buildStoredConversation,
   responsesToChatRequest,
   shouldStoreResponse,
+  validateResponsesRequest,
+  ResponseStore,
 } from "../adapters/responses.mjs";
 
 function sseChunk(payload) {
@@ -67,6 +69,34 @@ test("preserves responses tool_choice none", () => {
   });
 
   assert.equal(request.tool_choice, "none");
+});
+
+test("rejects unsupported responses input item types", () => {
+  const error = validateResponsesRequest({
+    model: "glm-5",
+    input: [
+      { type: "input_text", text: "caption this" },
+      { type: "input_image", image_url: "https://example.com/a.png" },
+    ],
+  });
+
+  assert.equal(
+    error,
+    "Unsupported responses input item type: input_image. Upstream only supports text and function calls.",
+  );
+});
+
+test("rejects unsupported responses tool types", () => {
+  const error = validateResponsesRequest({
+    model: "glm-5",
+    input: "search for this",
+    tools: [{ type: "web_search_preview" }],
+  });
+
+  assert.equal(
+    error,
+    "Unsupported responses tool type: web_search_preview. Upstream only supports function tools.",
+  );
 });
 
 test("builds responses object from chat completion response", () => {
@@ -230,6 +260,47 @@ test("does not synthesize a completed response for an incomplete upstream stream
 
   assert.equal(adapter.finished, false);
   assert.equal(adapter.flush(), "");
+});
+
+test("finishes a responses stream when upstream ends with DONE", () => {
+  const adapter = new OpenAIResponsesStreamAdapter({
+    body: {
+      model: "glm-5",
+    },
+    responseId: "resp_1",
+    model: "glm-5",
+  });
+
+  adapter.handleBlock(
+    sseChunk({
+      choices: [
+        {
+          delta: {
+            content: "partial",
+          },
+        },
+      ],
+    }).trimEnd(),
+  );
+
+  const done = adapter.handleBlock("data: [DONE]");
+  const response = adapter.buildResponse("completed");
+
+  assert.match(done, /event: response.completed/);
+  assert.equal(adapter.finished, true);
+  assert.equal(typeof response.completed_at, "number");
+});
+
+test("response store evicts the oldest completed response", () => {
+  const store = new ResponseStore({ maxEntries: 2 });
+
+  store.set("resp_1", { response: { id: "resp_1" } });
+  store.set("resp_2", { response: { id: "resp_2" } });
+  store.set("resp_3", { response: { id: "resp_3" } });
+
+  assert.equal(store.get("resp_1"), undefined);
+  assert.deepEqual(store.get("resp_2"), { response: { id: "resp_2" } });
+  assert.deepEqual(store.get("resp_3"), { response: { id: "resp_3" } });
 });
 
 test("shouldStoreResponse respects store false", () => {

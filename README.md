@@ -9,6 +9,12 @@ This proxy forwards requests to `http://115.120.82.129:3000/v1` and exposes:
 It is intended for local use with OpenAI-compatible clients, Claude Code, and
 Codex.
 
+Current upstream limitations:
+
+- text input/output only
+- function tools only
+- no image, search, file-search, or other hosted tool types
+
 ## Start
 
 ```bash
@@ -69,6 +75,14 @@ Detailed proxy logs are off by default. Enable them only when debugging:
 
 ```bash
 export PROXY_LOG=1
+```
+
+`/v1/responses` state is stored in memory for `previous_response_id` lookups.
+By default the proxy keeps the most recent 1000 stored responses. Override that
+with:
+
+```bash
+export RESPONSE_STORE_MAX_ENTRIES=1000
 ```
 
 ## Logs
