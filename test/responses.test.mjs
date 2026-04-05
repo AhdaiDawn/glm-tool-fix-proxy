@@ -5,6 +5,7 @@ import {
   buildResponsesObject,
   buildStoredConversation,
   responsesToChatRequest,
+  shouldStoreResponse,
 } from "../adapters/responses.mjs";
 
 function sseChunk(payload) {
@@ -56,6 +57,16 @@ test("maps responses request into chat completions request", () => {
   ]);
   assert.equal(request.tool_choice.function.name, "read");
   assert.equal(request.max_tokens, 512);
+});
+
+test("preserves responses tool_choice none", () => {
+  const request = responsesToChatRequest({
+    model: "glm-5",
+    input: "answer directly",
+    tool_choice: "none",
+  });
+
+  assert.equal(request.tool_choice, "none");
 });
 
 test("builds responses object from chat completion response", () => {
@@ -194,4 +205,35 @@ test("streams responses function call argument deltas from chat deltas", () => {
   assert.match(end, /"type":"response.function_call_arguments.done"/);
   assert.match(end, /"status":"completed"/);
   assert.match(end, /event: response.completed/);
+});
+
+test("does not synthesize a completed response for an incomplete upstream stream", () => {
+  const adapter = new OpenAIResponsesStreamAdapter({
+    body: {
+      model: "glm-5",
+    },
+    responseId: "resp_1",
+    model: "glm-5",
+  });
+
+  adapter.handleBlock(
+    sseChunk({
+      choices: [
+        {
+          delta: {
+            content: "partial",
+          },
+        },
+      ],
+    }).trimEnd(),
+  );
+
+  assert.equal(adapter.finished, false);
+  assert.equal(adapter.flush(), "");
+});
+
+test("shouldStoreResponse respects store false", () => {
+  assert.equal(shouldStoreResponse({ store: false }), false);
+  assert.equal(shouldStoreResponse({ store: true }), true);
+  assert.equal(shouldStoreResponse({}), true);
 });

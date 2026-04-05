@@ -49,7 +49,10 @@ function mapResponseToolChoice(toolChoice) {
     return undefined;
   }
   if (typeof toolChoice === "string") {
-    return toolChoice === "required" ? "required" : "auto";
+    if (toolChoice === "auto" || toolChoice === "required" || toolChoice === "none") {
+      return toolChoice;
+    }
+    return undefined;
   }
   if (toolChoice.type === "function") {
     return {
@@ -290,6 +293,10 @@ export class ResponseStore {
   set(responseId, value) {
     this.responses.set(responseId, value);
   }
+}
+
+export function shouldStoreResponse(body) {
+  return body?.store !== false;
 }
 
 export class OpenAIResponsesStreamAdapter {
@@ -609,21 +616,7 @@ export class OpenAIResponsesStreamAdapter {
   }
 
   flush() {
-    if (!this.usage) {
-      this.usage = {
-        input_tokens: 0,
-        input_tokens_details: {
-          cached_tokens: 0,
-        },
-        output_tokens: 0,
-        output_tokens_details: {
-          reasoning_tokens: 0,
-        },
-        total_tokens: 0,
-      };
-    }
-    const chunks = [];
-    return this.finish(chunks);
+    return "";
   }
 }
 

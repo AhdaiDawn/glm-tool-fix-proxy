@@ -12,6 +12,7 @@ import {
   buildResponsesObject,
   buildStoredConversation,
   responsesToChatRequest,
+  shouldStoreResponse,
 } from "./adapters/responses.mjs";
 import { pipeTransformedSse } from "./core/sse.mjs";
 import {
@@ -385,33 +386,35 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
       model: bodyJson.model,
     });
     await pipeTransformedSse(upstreamResponse, res, transformer);
-    responseStore.set(responseId, {
-      response: transformer.buildResponse("completed"),
-      messages: transformer.finished && transformer.outputItems
-        ? [
-            ...previousMessages.map((message) => ({ ...message })),
-            ...requestMessages.map((message) => ({ ...message })),
-            {
-              role: "assistant",
-              content: transformer.outputText,
-              ...(transformer.outputItems.some((item) => item.type === "function_call")
-                ? {
-                    tool_calls: transformer.outputItems
-                      .filter((item) => item.type === "function_call")
-                      .map((item) => ({
-                        id: item.call_id,
-                        type: "function",
-                        function: {
-                          name: item.name,
-                          arguments: item.arguments,
-                        },
-                      })),
-                  }
-                : {}),
-            },
-          ]
-        : [...previousMessages, ...requestMessages],
-    });
+    if (transformer.finished && shouldStoreResponse(bodyJson)) {
+      responseStore.set(responseId, {
+        response: transformer.buildResponse("completed"),
+        messages: transformer.outputItems
+          ? [
+              ...previousMessages.map((message) => ({ ...message })),
+              ...requestMessages.map((message) => ({ ...message })),
+              {
+                role: "assistant",
+                content: transformer.outputText,
+                ...(transformer.outputItems.some((item) => item.type === "function_call")
+                  ? {
+                      tool_calls: transformer.outputItems
+                        .filter((item) => item.type === "function_call")
+                        .map((item) => ({
+                          id: item.call_id,
+                          type: "function",
+                          function: {
+                            name: item.name,
+                            arguments: item.arguments,
+                          },
+                        })),
+                    }
+                  : {}),
+              },
+            ]
+          : [...previousMessages, ...requestMessages],
+      });
+    }
     logEvent("proxy_adapter_complete", {
       ...logContext,
       downstream_api: "openai_responses",
@@ -421,7 +424,7 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
       retry_max_tokens: retry?.retry_max_tokens || null,
       output_items: transformer.outputItems.length,
       output_text_chars: transformer.outputText.length,
-      result: "ok",
+      result: transformer.finished ? "ok" : "incomplete",
     });
     res.end();
     return;
@@ -429,10 +432,12 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
 
   const chatResponse = JSON.parse(Buffer.from(await upstreamResponse.arrayBuffer()).toString("utf8"));
   const responseObject = buildResponsesObject(bodyJson, chatResponse, responseId);
-  responseStore.set(responseId, {
-    response: responseObject,
-    messages: buildStoredConversation(previousMessages, requestMessages, chatResponse),
-  });
+  if (shouldStoreResponse(bodyJson)) {
+    responseStore.set(responseId, {
+      response: responseObject,
+      messages: buildStoredConversation(previousMessages, requestMessages, chatResponse),
+    });
+  }
   logEvent("proxy_adapter_complete", {
     ...logContext,
     downstream_api: "openai_responses",

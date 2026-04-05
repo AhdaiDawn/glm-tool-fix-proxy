@@ -182,3 +182,22 @@ test("streams anthropic tool_use events from chat tool_call deltas", () => {
   assert.match(end, /"stop_reason":"tool_use"/);
   assert.match(end, /event: message_stop/);
 });
+
+test("does not synthesize anthropic completion events for an incomplete upstream stream", () => {
+  const adapter = new AnthropicMessagesStreamAdapter({ model: "glm-5" });
+
+  adapter.handleBlock(
+    sseChunk({
+      choices: [
+        {
+          delta: {
+            content: "partial",
+          },
+        },
+      ],
+    }).trimEnd(),
+  );
+
+  assert.equal(adapter.finished, false);
+  assert.equal(adapter.flush(), "");
+});

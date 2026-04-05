@@ -2,6 +2,16 @@ export const PORT = Number(process.env.PORT || 3401);
 export const HOST = process.env.HOST || "127.0.0.1";
 export const UPSTREAM_BASE_URL = process.env.UPSTREAM_BASE_URL || "http://127.0.0.1:3000/v1";
 export const UPSTREAM_API_KEY = process.env.UPSTREAM_API_KEY || "";
+const HOP_BY_HOP_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
 
 export function readRequestBody(req) {
   return new Promise((resolve, reject) => {
@@ -48,7 +58,7 @@ export function buildUpstreamHeaders(req, body) {
     if (value === undefined) {
       continue;
     }
-    if (key === "host" || key === "content-length" || key === "accept-encoding") {
+    if (key === "host" || key === "content-length" || key === "accept-encoding" || HOP_BY_HOP_HEADERS.has(key)) {
       continue;
     }
     if (Array.isArray(value)) {
@@ -83,7 +93,7 @@ export async function fetchUpstream(req, body, upstreamUrl, controller) {
 
 export function copyResponseHeaders(upstreamHeaders, res) {
   for (const [key, value] of upstreamHeaders.entries()) {
-    if (key === "content-length" || key === "content-encoding") {
+    if (key === "content-length" || key === "content-encoding" || HOP_BY_HOP_HEADERS.has(key)) {
       continue;
     }
     res.setHeader(key, value);

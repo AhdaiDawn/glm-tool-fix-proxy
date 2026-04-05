@@ -439,7 +439,6 @@ export class AnthropicMessagesStreamAdapter {
   }
 
   flush() {
-    const chunks = [];
-    return this.finish(chunks);
+    return "";
   }
 }
