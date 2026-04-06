@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampMaxTokens, parseContextLimitRetry } from "../core/token-limits.mjs";
+import {
+  DEFAULT_UPSTREAM_MAX_TOKENS,
+  clampMaxTokens,
+  parseContextLimitRetry,
+} from "../core/token-limits.mjs";
 
 test("clampMaxTokens leaves small values unchanged", () => {
   assert.deepEqual(clampMaxTokens(2048), {
@@ -18,6 +22,22 @@ test("clampMaxTokens reduces large values to the upstream cap", async () => {
   assert.deepEqual(dynamicClampMaxTokens(64000), {
     requested: 64000,
     upstream: 8192,
+    clamped: true,
+  });
+
+  process.env.UPSTREAM_MAX_TOKENS = original;
+});
+
+test("UPSTREAM_MAX_TOKENS defaults to 8192 when env is unset", async () => {
+  const original = process.env.UPSTREAM_MAX_TOKENS;
+  delete process.env.UPSTREAM_MAX_TOKENS;
+  const { UPSTREAM_MAX_TOKENS: dynamicUpstreamMaxTokens, clampMaxTokens: dynamicClampMaxTokens } =
+    await import(`../core/token-limits.mjs?default-cap`);
+
+  assert.equal(dynamicUpstreamMaxTokens, DEFAULT_UPSTREAM_MAX_TOKENS);
+  assert.deepEqual(dynamicClampMaxTokens(64000), {
+    requested: 64000,
+    upstream: DEFAULT_UPSTREAM_MAX_TOKENS,
     clamped: true,
   });
 

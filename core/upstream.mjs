@@ -100,6 +100,18 @@ export function copyResponseHeaders(upstreamHeaders, res) {
   }
 }
 
+export function prepareStreamingResponse(res) {
+  res.setHeader("cache-control", "no-cache");
+  res.setHeader("x-accel-buffering", "no");
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+  if (typeof res.socket?.setNoDelay === "function") {
+    res.socket.setNoDelay(true);
+  }
+}
+
 export function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader("content-type", "application/json; charset=utf-8");

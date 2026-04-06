@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildUpstreamHeaders, copyResponseHeaders } from "../core/upstream.mjs";
+import { buildUpstreamHeaders, copyResponseHeaders, prepareStreamingResponse } from "../core/upstream.mjs";
 
 test("buildUpstreamHeaders drops hop-by-hop request headers", () => {
   const headers = buildUpstreamHeaders(
@@ -50,4 +50,30 @@ test("copyResponseHeaders drops hop-by-hop response headers", () => {
   assert.equal(recorded.has("trailer"), false);
   assert.equal(recorded.get("content-type"), "text/event-stream");
   assert.equal(recorded.get("x-request-id"), "req_123");
+});
+
+test("prepareStreamingResponse flushes headers and disables proxy buffering", () => {
+  const recorded = new Map();
+  let flushed = false;
+  let noDelay = null;
+  const res = {
+    socket: {
+      setNoDelay(value) {
+        noDelay = value;
+      },
+    },
+    flushHeaders() {
+      flushed = true;
+    },
+    setHeader(name, value) {
+      recorded.set(name, value);
+    },
+  };
+
+  prepareStreamingResponse(res);
+
+  assert.equal(recorded.get("cache-control"), "no-cache");
+  assert.equal(recorded.get("x-accel-buffering"), "no");
+  assert.equal(flushed, true);
+  assert.equal(noDelay, true);
 });

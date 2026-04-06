@@ -9,7 +9,11 @@ function parsePositiveInteger(value, fallback) {
   return parsed;
 }
 
-export const UPSTREAM_MAX_TOKENS = parsePositiveInteger(process.env.UPSTREAM_MAX_TOKENS, null);
+export const DEFAULT_UPSTREAM_MAX_TOKENS = 8192;
+export const UPSTREAM_MAX_TOKENS = parsePositiveInteger(
+  process.env.UPSTREAM_MAX_TOKENS,
+  DEFAULT_UPSTREAM_MAX_TOKENS,
+);
 
 export function clampMaxTokens(requestedMaxTokens) {
   const requested = parsePositiveInteger(requestedMaxTokens, null);
@@ -17,14 +21,6 @@ export function clampMaxTokens(requestedMaxTokens) {
     return {
       requested: null,
       upstream: null,
-      clamped: false,
-    };
-  }
-
-  if (UPSTREAM_MAX_TOKENS === null) {
-    return {
-      requested,
-      upstream: requested,
       clamped: false,
     };
   }

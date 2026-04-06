@@ -25,6 +25,7 @@ import {
   copyResponseHeaders,
   fetchUpstream,
   parseJsonBody,
+  prepareStreamingResponse,
   proxyErrorPayload,
   readRequestBody,
   sendJson,
@@ -116,12 +117,17 @@ async function proxyRawJson(req, res, body, pathname, search, bodyJson, logConte
   }
 
   if (isStreamingChatCompletion(req, bodyJson, pathname)) {
-    await pipeTransformedSse(upstreamResponse, res, new ChatCompletionRepairTransformer());
+    prepareStreamingResponse(res);
+    const streamStats = await pipeTransformedSse(upstreamResponse, res, new ChatCompletionRepairTransformer());
     logEvent("proxy_stream_complete", {
       ...logContext,
       downstream_api: "openai_chat_completions",
       upstream_api: "passthrough",
       stream: true,
+      stream_first_write_ms: streamStats.firstWriteMs,
+      upstream_chunk_count: streamStats.upstreamChunks,
+      transformed_block_count: streamStats.transformedBlocks,
+      downstream_write_count: streamStats.writes,
     });
     res.end();
     return;
@@ -277,10 +283,10 @@ async function handleMessagesRequest(req, res, bodyJson, logContext) {
   res.statusCode = upstreamResponse.status;
   res.statusMessage = upstreamResponse.statusText;
   res.setHeader("content-type", bodyJson.stream ? "text/event-stream; charset=utf-8" : "application/json; charset=utf-8");
-  res.setHeader("cache-control", "no-cache");
 
   if (bodyJson.stream) {
-    await pipeTransformedSse(
+    prepareStreamingResponse(res);
+    const streamStats = await pipeTransformedSse(
       upstreamResponse,
       res,
       new AnthropicMessagesStreamAdapter({ model: bodyJson.model }),
@@ -291,6 +297,10 @@ async function handleMessagesRequest(req, res, bodyJson, logContext) {
       upstream_api: "openai_chat_completions",
       stream: true,
       retry_max_tokens: retry?.retry_max_tokens || null,
+      stream_first_write_ms: streamStats.firstWriteMs,
+      upstream_chunk_count: streamStats.upstreamChunks,
+      transformed_block_count: streamStats.transformedBlocks,
+      downstream_write_count: streamStats.writes,
       result: "ok",
     });
     res.end();
@@ -407,7 +417,6 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
   res.statusCode = upstreamResponse.status;
   res.statusMessage = upstreamResponse.statusText;
   res.setHeader("content-type", bodyJson.stream ? "text/event-stream; charset=utf-8" : "application/json; charset=utf-8");
-  res.setHeader("cache-control", "no-cache");
 
   if (bodyJson.stream) {
     const transformer = new OpenAIResponsesStreamAdapter({
@@ -415,7 +424,8 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
       responseId,
       model: bodyJson.model,
     });
-    await pipeTransformedSse(upstreamResponse, res, transformer);
+    prepareStreamingResponse(res);
+    const streamStats = await pipeTransformedSse(upstreamResponse, res, transformer);
     if (transformer.finished && shouldStoreResponse(bodyJson)) {
       responseStore.set(responseId, {
         response: transformer.buildResponse("completed"),
@@ -452,6 +462,10 @@ async function handleResponsesRequest(req, res, bodyJson, logContext) {
       stream: true,
       response_id: responseId,
       retry_max_tokens: retry?.retry_max_tokens || null,
+      stream_first_write_ms: streamStats.firstWriteMs,
+      upstream_chunk_count: streamStats.upstreamChunks,
+      transformed_block_count: streamStats.transformedBlocks,
+      downstream_write_count: streamStats.writes,
       output_items: transformer.outputItems.length,
       output_text_chars: transformer.outputText.length,
       result: transformer.finished ? "ok" : "incomplete",

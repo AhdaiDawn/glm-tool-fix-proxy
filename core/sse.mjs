@@ -1,3 +1,5 @@
+import { once } from "node:events";
+
 export function splitSseBlocks(buffer) {
   const normalized = buffer.replace(/\r\n/g, "\n");
   const parts = normalized.split("\n\n");
@@ -36,10 +38,32 @@ export function formatSseData(payload) {
   return formatSseEvent(null, payload);
 }
 
+async function writeSseOutput(res, output, stats, startedAt) {
+  if (!output) {
+    return;
+  }
+
+  if (stats.firstWriteMs === null) {
+    stats.firstWriteMs = Date.now() - startedAt;
+  }
+  stats.writes += 1;
+
+  if (!res.write(output)) {
+    await once(res, "drain");
+  }
+}
+
 export async function pipeTransformedSse(upstreamResponse, res, transformer) {
   const reader = upstreamResponse.body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
+  const startedAt = Date.now();
+  const stats = {
+    upstreamChunks: 0,
+    transformedBlocks: 0,
+    writes: 0,
+    firstWriteMs: null,
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -47,15 +71,15 @@ export async function pipeTransformedSse(upstreamResponse, res, transformer) {
       break;
     }
 
+    stats.upstreamChunks += 1;
     pending += decoder.decode(value, { stream: true });
     const { complete, rest } = splitSseBlocks(pending);
     pending = rest;
 
     for (const block of complete) {
       const output = transformer.handleBlock(block);
-      if (output) {
-        res.write(output);
-      }
+      stats.transformedBlocks += 1;
+      await writeSseOutput(res, output, stats, startedAt);
     }
   }
 
@@ -64,20 +88,17 @@ export async function pipeTransformedSse(upstreamResponse, res, transformer) {
     const { complete, rest } = splitSseBlocks(`${pending}\n\n`);
     for (const block of complete) {
       const output = transformer.handleBlock(block);
-      if (output) {
-        res.write(output);
-      }
+      stats.transformedBlocks += 1;
+      await writeSseOutput(res, output, stats, startedAt);
     }
     if (rest) {
       const output = transformer.handleBlock(rest);
-      if (output) {
-        res.write(output);
-      }
+      stats.transformedBlocks += 1;
+      await writeSseOutput(res, output, stats, startedAt);
     }
   }
 
   const flushed = transformer.flush();
-  if (flushed) {
-    res.write(flushed);
-  }
+  await writeSseOutput(res, flushed, stats, startedAt);
+  return stats;
 }

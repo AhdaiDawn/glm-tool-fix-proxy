@@ -4,7 +4,7 @@ port := env_var_or_default("PORT", "3401")
 host := env_var_or_default("HOST", "127.0.0.1")
 upstream := env_var_or_default("UPSTREAM_BASE_URL", "http://115.120.82.129:3000/v1")
 upstream_model := env_var_or_default("UPSTREAM_MODEL", "glm-5")
-upstream_max_tokens := env_var_or_default("UPSTREAM_MAX_TOKENS", "")
+upstream_max_tokens := env_var_or_default("UPSTREAM_MAX_TOKENS", "8192")
 
 default:
   @just --list

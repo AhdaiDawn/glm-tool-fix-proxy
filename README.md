@@ -23,6 +23,7 @@ PORT=3401 \
 HOST=127.0.0.1 \
 UPSTREAM_BASE_URL=http://115.120.82.129:3000/v1 \
 UPSTREAM_MODEL=glm-5 \
+UPSTREAM_MAX_TOKENS=8192 \
 node server.mjs
 ```
 
@@ -33,7 +34,7 @@ cd /home/ahdai/Desktop/code/glm-tool-fix-proxy
 just start
 ```
 
-`just start` defaults to `UPSTREAM_MODEL=glm-5`.
+`just start` defaults to `UPSTREAM_MODEL=glm-5` and `UPSTREAM_MAX_TOKENS=8192`.
 
 If needed, set a fixed upstream key:
 
@@ -56,15 +57,14 @@ export UPSTREAM_MODEL_MAP='{"claude-opus-4-6":"glm-5","gpt-5.4":"glm-5"}'
 
 `UPSTREAM_MODEL` has higher priority than `UPSTREAM_MODEL_MAP`.
 
-If you want to force a fixed upper bound, you can still clamp outgoing
-`max_tokens` manually:
+The proxy now defaults to clamping outgoing `max_tokens` to `8192`. Override it
+if your upstream can handle a different limit:
 
 ```bash
 export UPSTREAM_MAX_TOKENS=32000
 ```
 
-By default, the proxy does not force a fixed output cap. If the upstream
-returns a context-length error such as:
+If the upstream still returns a context-length error such as:
 
 - `You passed ... input tokens and requested ... output tokens`
 
